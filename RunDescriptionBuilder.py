@@ -3,8 +3,10 @@ import sys
 import json
 import os
 
-class Ui_MainWindow(object):
+class Ui_MainWindow(QtCore.QObject):
     IMAGE_PATH = "GeometricDescription.png"
+    # 儲存大圖視窗的參考，防止被垃圾回收
+    full_image_window = None
     def setupUi(self, MainWindow):
         MainWindow.setObjectName("MainWindow")
         MainWindow.resize(1920, 953)
@@ -190,6 +192,10 @@ class Ui_MainWindow(object):
         self.graphicsView = QtWidgets.QGraphicsView(self.centralwidget)
         self.graphicsView.setGeometry(QtCore.QRect(920, 20, 251, 171))
         self.graphicsView.setObjectName("graphicsView")
+
+        # 修正 2: 安裝事件過濾器到 QGraphicsView 的 viewport 上
+        self.graphicsView.viewport().installEventFilter(self)
+
         # 圖片載入邏輯（僅顯示縮略圖）
         img = QtGui.QPixmap(self.IMAGE_PATH)
         scene = QtWidgets.QGraphicsScene()
@@ -1084,6 +1090,75 @@ class Ui_MainWindow(object):
 
         QtCore.QMetaObject.connectSlotsByName(MainWindow)
 
+    # 新增方法 1: 處理事件過濾
+    def eventFilter(self, source, event):
+        """捕獲 QGraphicsView 上的滑鼠點擊事件，以彈出大圖。"""
+        
+        try:
+            # 只有當 source 是 graphicsView 的 viewport 且是左鍵釋放事件時才處理
+            if source == self.graphicsView.viewport() and event.type() == QtCore.QEvent.MouseButtonRelease:
+                if event.button() == QtCore.Qt.LeftButton:
+                    self.open_full_image()
+                    return True # 處理事件，阻止進一步傳播
+                    
+        except RuntimeError:
+            # 如果 self.graphicsView.viewport() 拋出 RuntimeError (因為物件已刪除)
+            # 則忽略該事件，並讓它通過。
+            pass
+            
+        # 呼叫父類的 eventFilter
+        return super().eventFilter(source, event)
+
+    # 新增方法 2: 開啟大圖視窗
+    def open_full_image(self):
+        """在新視窗中顯示原始大小的圖片。"""
+        # 檢查圖片檔案是否存在
+        if not os.path.exists(self.IMAGE_PATH):
+            QtWidgets.QMessageBox.critical(
+                None, 
+                "檔案錯誤", 
+                f"圖片檔案未找到: {self.IMAGE_PATH}"
+            )
+            return
+
+        # 創建一個新的 QMainWindow 視窗
+        # 這裡使用 self.full_image_window 作為成員變數，避免其被垃圾回收 (Garbage Collected)
+        self.full_image_window = QtWidgets.QMainWindow()
+        self.full_image_window.setWindowTitle("Geometric Description - Full Image")
+        
+        # 使用 QLabel 載入並顯示圖片
+        image_label = QtWidgets.QLabel()
+        image_label.setAlignment(QtCore.Qt.AlignCenter)
+        image_label.setScaledContents(True) # 允許縮放 QLabel 的內容
+
+        pixmap = QtGui.QPixmap(self.IMAGE_PATH)
+        if pixmap.isNull():
+            image_label.setText("無法載入圖片")
+        else:
+            image_label.setPixmap(pixmap)
+            
+            # 取得螢幕可用尺寸
+            screen_rect = QtWidgets.QApplication.desktop().availableGeometry()
+            max_width = screen_rect.width() * 0.95
+            max_height = screen_rect.height() * 0.95
+
+            # 調整圖片大小以適應螢幕，同時保持長寬比
+            if pixmap.width() > max_width or pixmap.height() > max_height:
+                scaled_pixmap = pixmap.scaled(
+                    int(max_width), 
+                    int(max_height), 
+                    QtCore.Qt.KeepAspectRatio, 
+                    QtCore.Qt.SmoothTransformation
+                )
+                image_label.setPixmap(scaled_pixmap)
+                self.full_image_window.resize(scaled_pixmap.size())
+            else:
+                self.full_image_window.resize(pixmap.size())
+
+        # 將 QLabel 設置為新視窗的中心部件
+        self.full_image_window.setCentralWidget(image_label)
+        self.full_image_window.show()
+
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate
         MainWindow.setWindowTitle(_translate("MainWindow", "MainWindow"))
@@ -1225,7 +1300,7 @@ class Ui_MainWindow(object):
             
         except Exception as e:
             print(f"儲存 JSON 文件時發生錯誤: {e}")
-            print(f"檢查 Output File Path 是否為有效的目錄路徑：{output_base_path}")
+            print(f"請檢查 Output File Path 是否為有效的目錄路徑：{output_base_path}")
 
 
 if __name__ == "__main__":
